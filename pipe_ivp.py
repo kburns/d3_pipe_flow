@@ -8,22 +8,23 @@ logger = logging.getLogger(__name__)
 
 # Parameters
 Lz = 2 * np.pi
-Nz = 32
-Nphi = 32
-Nr = 32
-Re = 1e1
+Nz = 256
+Nphi = 256
+Nr = 66
+Re = 5300
 dealias = 3/2
 stop_sim_time = 50
 timestepper = d3.RK443
 safety = 0.25
 max_timestep = safety * Lz / Nz
 dtype = np.float64
+mesh = None
 
 # Bases
 z_coord = d3.Coordinate('z')
 disk_coords = d3.PolarCoordinates('phi', 'r')
 cyl_coords = d3.DirectProduct(z_coord, disk_coords)
-dist = d3.Distributor(cyl_coords, dtype=dtype)
+dist = d3.Distributor(cyl_coords, dtype=dtype, mesh=mesh)
 z_basis = d3.Fourier(z_coord, size=Nz, bounds=(0, Lz), dealias=dealias, dtype=dtype)
 disk_basis = d3.DiskBasis(disk_coords, shape=(Nphi, Nr), radius=1, dealias=dealias, dtype=dtype)
 z, phi, r = dist.local_grids(z_basis, disk_basis)
