@@ -1,7 +1,6 @@
 
 
 import numpy as np
-import matplotlib.pyplot as plt
 import dedalus.public as d3
 import logging
 logger = logging.getLogger(__name__)
@@ -23,8 +22,7 @@ cyl_coords = d3.DirectProduct(z_coord, disk_coords)
 dist = d3.Distributor(cyl_coords, dtype=dtype)
 z_basis = d3.Fourier(z_coord, size=Nz, bounds=(0, 2*np.pi), dtype=dtype)
 disk_basis = d3.DiskBasis(disk_coords, shape=(Nphi, Nr), radius=1, dtype=dtype)
-z = dist.local_grid(z_basis)
-phi, r = dist.local_grids(disk_basis)
+z, phi, r = dist.local_grids(z_basis, disk_basis)
 
 # Fields
 s = dist.Field(name='s')
