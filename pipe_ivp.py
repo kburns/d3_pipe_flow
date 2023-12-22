@@ -7,18 +7,18 @@ logger = logging.getLogger(__name__)
 
 
 # Parameters
-Lz = 2 * np.pi
-Nz = 256
-Nphi = 256
-Nr = 66
+Lz = 2*np.pi
+Nz = 128
+Nphi = 252
+Nr = 64
 Re = 5300
 dealias = 3/2
-stop_sim_time = 50
+stop_wall_time = 12*60*60
 timestepper = d3.RK443
-safety = 0.25
+safety = 0.5
 max_timestep = safety * Lz / Nz
 dtype = np.float64
-mesh = None
+mesh = (16, 32)
 
 # Bases
 z_coord = d3.Coordinate('z')
@@ -30,7 +30,7 @@ disk_basis = d3.DiskBasis(disk_coords, shape=(Nphi, Nr), radius=1, dealias=deali
 z, phi, r = dist.local_grids(z_basis, disk_basis)
 
 # Fields
-u0 = dist.VectorField(cyl_coords, name='u0', bases=disk_basis.radial_basis)
+u0 = dist.VectorField(cyl_coords, name='u0', bases=(z_basis, disk_basis))
 u = dist.VectorField(cyl_coords, name='u', bases=(z_basis, disk_basis))
 p = dist.Field(name='p', bases=(z_basis, disk_basis))
 tau_u = dist.VectorField(cyl_coords, name='tau_u', bases=(z_basis, disk_basis.edge))
@@ -51,20 +51,32 @@ problem.add_equation("integ(p) = 0")
 
 # Solver
 solver = problem.build_solver(timestepper)
-solver.stop_sim_time = stop_sim_time
+solver.stop_wall_time = stop_wall_time
 
 # Initial conditions
-u.fill_random('g', seed=42, distribution='normal', scale=1e-3) # Random noise
+u.fill_random('g', seed=42, distribution='normal', scale=0.5) # Random noise
+u.low_pass_filter(scales=0.5)
 u['g'][0] += 1 - r**2
+u0['g'][0] = 1 - r**2
+u1 = u - u0
+
+tau_wall = d3.radial(d3.grad(ez@u)(r=1))/Re
 
 # Analysis
-snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=5, max_writes=50)
+snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=10, max_writes=1, parallel='gather')
 snapshots.add_tasks(solver.state)
-slices = solver.evaluator.add_file_handler('slices', sim_dt=0.25, max_writes=50)
+slices = solver.evaluator.add_file_handler('slices', sim_dt=0.1, max_writes=100, parallel='gather')
 slices.add_task(u(z=0), name='u(z=0)')
 slices.add_task(u(phi=0), name='u(phi=0)')
 slices.add_task(u(phi=np.pi), name='u(phi=pi)')
 slices.add_task(u(r=0.95), name='u(r=0.95)')
+slices.add_task(u(r=0.99), name='u(r=0.99)')
+slices.add_task(u1(z=0), name='u1(z=0)')
+slices.add_task(u1(phi=0), name='u1(phi=0)')
+slices.add_task(u1(phi=np.pi), name='u1(phi=pi)')
+slices.add_task(u1(r=0.95), name='u1(r=0.95)')
+slices.add_task(u1(r=0.99), name='u1(r=0.99)')
+slices.add_task(tau_wall, name='tau_wall')
 
 # CFL
 CFL = d3.CFL(solver, initial_dt=max_timestep, cadence=1, safety=safety, threshold=0.05,
@@ -74,6 +86,8 @@ CFL.add_velocity(u)
 # Flow properties
 flow = d3.GlobalFlowProperty(solver, cadence=10)
 flow.add_property((u@u)/2, name='KE')
+flow.add_property((u1@u1)/2, name='KE1')
+flow.add_property(d3.ave(tau_wall), name='tw')
 
 # Main loop
 try:
@@ -82,7 +96,7 @@ try:
         timestep = CFL.compute_timestep()
         solver.step(timestep)
         if (solver.iteration-1) % 10 == 0:
-            logger.info('Iteration=%i, Time=%e, dt=%e, max(KE)=%f' %(solver.iteration, solver.sim_time, timestep, flow.max('KE')))
+            logger.info('Iteration=%i, Time=%e, dt=%e, max(KE)=%f, max(KE1)=%f, tw=%e' %(solver.iteration, solver.sim_time, timestep, flow.max('KE'), flow.max('KE1'), flow.max('tw')))
 except:
     logger.error('Exception raised, triggering end of main loop.')
     raise
