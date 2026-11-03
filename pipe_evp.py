@@ -1,4 +1,9 @@
-
+"""
+Pipe flow stability eigenvalue problem in Dedalus.
+With radius R and centerline velocity U, the Reynolds number is Re = R*U/nu.
+This script is nondimensionalized such that R=1 and U=1.
+The base parabolic flow profile is then u0(r) = 1 - r**2.
+"""
 
 import numpy as np
 import dedalus.public as d3
@@ -7,20 +12,24 @@ logger = logging.getLogger(__name__)
 
 
 # Parameters
-Re = 1e4
-nz = 1
+kz = 1
 m = 12
-Nz = 2 * nz
-Nphi = 2 * m
 Nr = 64
+Re = 3e3
+n_evals = 6
 dtype = np.complex128
+
+# Derived/fixed parameters
+Nphi = 2 * (abs(m) + 1)  # includes azimuthal wavenumbers up to |m|
+Nz = 3  # wavenumbers [0, |kz|, -|kz|]
+Lz = 2 * np.pi / (abs(kz) + (kz==0))
 
 # Bases
 z_coord = d3.Coordinate('z')
 disk_coords = d3.PolarCoordinates('phi', 'r')
 cyl_coords = d3.DirectProduct(z_coord, disk_coords)
 dist = d3.Distributor(cyl_coords, dtype=dtype)
-z_basis = d3.Fourier(z_coord, size=Nz, bounds=(0, 2*np.pi), dtype=dtype)
+z_basis = d3.Fourier(z_coord, size=Nz, bounds=(0, Lz), dtype=dtype)
 disk_basis = d3.DiskBasis(disk_coords, shape=(Nphi, Nr), radius=1, dtype=dtype)
 z, phi, r = dist.local_grids(z_basis, disk_basis)
 
@@ -48,11 +57,12 @@ problem.add_equation("u(r=1) = 0")
 problem.add_equation("integ(p) = 0")
 
 # Solver
+nz = int(np.sign(kz))  # z group: -1, 0, or 1
 solver = problem.build_solver()
 sp = solver.subproblems_by_group[(nz, m, None)]
 solver.solve_dense(sp)
 evals = solver.eigenvalues[np.isfinite(solver.eigenvalues)]
 evals = evals[np.argsort(-evals.real)]
-for i in range(6):
+for i in range(n_evals):
     print(evals[i])
 
