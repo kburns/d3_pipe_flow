@@ -1,4 +1,9 @@
-
+"""
+Pipe flow initial value problem at fixed pressure gradient in Dedalus.
+With radius R and centerline velocity U, the Reynolds number is Re = R*U/nu.
+This script is nondimensionalized such that R=1 and U=1, where U is the
+centerline velocity of the laminar profile u = (1 - r**2)*ez.
+"""
 
 import numpy as np
 import dedalus.public as d3
@@ -7,18 +12,18 @@ logger = logging.getLogger(__name__)
 
 
 # Parameters
-Lz = 2*np.pi
+Lz = 2 * np.pi
 Nz = 128
-Nphi = 252
+Nphi = 192
 Nr = 64
 Re = 5300
 dealias = 3/2
-stop_wall_time = 12*60*60
+dtype = np.float64
+stop_sim_time = 100
 timestepper = d3.RK443
 safety = 0.5
 max_timestep = safety * Lz / Nz
-dtype = np.float64
-mesh = (16, 32)
+mesh = None
 
 # Bases
 z_coord = d3.Coordinate('z')
@@ -30,17 +35,24 @@ disk_basis = d3.DiskBasis(disk_coords, shape=(Nphi, Nr), radius=1, dealias=deali
 z, phi, r = dist.local_grids(z_basis, disk_basis)
 
 # Fields
-u0 = dist.VectorField(cyl_coords, name='u0', bases=(z_basis, disk_basis))
 u = dist.VectorField(cyl_coords, name='u', bases=(z_basis, disk_basis))
 p = dist.Field(name='p', bases=(z_basis, disk_basis))
 tau_u = dist.VectorField(cyl_coords, name='tau_u', bases=(z_basis, disk_basis.edge))
 tau_p = dist.Field(name='tau_p')
 
+# Base flow
+u0 = dist.VectorField(cyl_coords, name='u0', bases=(z_basis, disk_basis))
+u0['g'][0] = 1 - r**2
+
 # Substitutions
 ez = dist.VectorField(cyl_coords, bases=disk_basis)
 ez['g'][0] = 1
+er = dist.VectorField(cyl_coords, bases=disk_basis.edge)
+er['g'][2] = 1
 lift_basis = disk_basis.derivative_basis(2)
 lift = lambda A: d3.Lift(A, lift_basis, -1)
+u1 = u - u0
+tau_wall = - er @ d3.grad(ez@u)(r=1) / Re  # d3.radial picks the wrong component on DirectProduct coords
 
 # Problem
 problem = d3.IVP([u, p, tau_u, tau_p], namespace=locals())
@@ -51,19 +63,15 @@ problem.add_equation("integ(p) = 0")
 
 # Solver
 solver = problem.build_solver(timestepper)
-solver.stop_wall_time = stop_wall_time
+solver.stop_sim_time = stop_sim_time
 
 # Initial conditions
 u.fill_random('g', seed=42, distribution='normal', scale=0.5) # Random noise
 u.low_pass_filter(scales=0.5)
-u['g'][0] += 1 - r**2
-u0['g'][0] = 1 - r**2
-u1 = u - u0
-
-tau_wall = d3.radial(d3.grad(ez@u)(r=1))/Re
+u['g'][0] += u0['g'][0]
 
 # Analysis
-snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=10, max_writes=1, parallel='gather')
+snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=5, max_writes=1, parallel='gather')
 snapshots.add_tasks(solver.state)
 slices = solver.evaluator.add_file_handler('slices', sim_dt=0.1, max_writes=100, parallel='gather')
 slices.add_task(u(z=0), name='u(z=0)')
